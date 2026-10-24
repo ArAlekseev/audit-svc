@@ -1,0 +1,15 @@
+# Подключаем готовый шаблон CI/CD пайплайна
+include:
+  - project: demo/templates
+    ref: main
+    file:
+      - pipelines/python_poetry_docker.yml
+
+# Используем Dockerfile нашего приложения
+variables:
+  DOCKERFILE: Dockerfile
+
+# Отключаем стандартный деплой
+Deploy Job:
+  rules:
+    - when: never
