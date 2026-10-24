@@ -1,0 +1,138 @@
+
+---
+- name: Deploy audit-svc application
+  hosts: deploy
+  gather_facts: false
+
+  vars_files:
+    - group_vars/all/vault.yml
+
+  vars:
+    project_name: audit-svc
+    deploy_dir: /data/audit-svc
+    network_name: audit-network
+
+    postgres_container: audit-postgres
+    postgres_image: postgres:17
+    postgres_database: audit
+    postgres_user: audit_svc
+
+    app_container: audit-svc
+    app_port: 8080
+
+  tasks:
+    # Создаём директорию для конфигурации приложения
+    - name: Create application directory
+      ansible.builtin.file:
+        path: "{{ deploy_dir }}"
+        state: directory
+        mode: "0750"
+
+    # Создаём отдельную Docker-сеть для приложения и БД
+    - name: Create Docker network
+      community.docker.docker_network:
+        name: "{{ network_name }}"
+        state: present
+
+    # Запускаем PostgreSQL с постоянным хранением данных
+    - name: Start PostgreSQL container
+      community.docker.docker_container:
+        name: "{{ postgres_container }}"
+        image: "{{ postgres_image }}"
+        state: started
+        restart_policy: unless-stopped
+        env:
+          POSTGRES_PASSWORD: "{{ postgres_password }}"
+        volumes:
+          - audit-postgres-data:/var/lib/postgresql/data
+        networks:
+          - name: "{{ network_name }}"
+      register: postgres_container_result
+
+    # Ожидаем готовности PostgreSQL
+    - name: Wait for PostgreSQL
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - "{{ postgres_container }}"
+          - pg_isready
+          - -U
+          - postgres
+      register: postgres_ready
+      retries: 15
+      delay: 2
+      until: postgres_ready.rc == 0
+      changed_when: false
+
+    # Создаём пользователя приложения в PostgreSQL
+    - name: Create application database user
+      community.postgresql.postgresql_user:
+        name: "{{ postgres_user }}"
+        password: "{{ db_password }}"
+        role_attr_flags: LOGIN
+        login_host: 127.0.0.1
+        login_user: postgres
+        login_password: "{{ postgres_password }}"
+      no_log: true
+
+    # Создаём базу данных для событий аудита
+    - name: Create application database
+      community.postgresql.postgresql_db:
+        name: "{{ postgres_database }}"
+        owner: "{{ postgres_user }}"
+        login_host: 127.0.0.1
+        login_user: postgres
+        login_password: "{{ postgres_password }}"
+      no_log: true
+
+    # Формируем YAML-конфигурацию приложения
+    - name: Generate application configuration
+      ansible.builtin.template:
+        src: templates/config.yaml.j2
+        dest: "{{ deploy_dir }}/config.yaml"
+        mode: "0600"
+      no_log: true
+
+    # Авторизуемся в Harbor для получения образа
+    - name: Log in to Harbor registry
+      community.docker.docker_login:
+        registry_url: harbor.localtest.me:8443
+        username: "{{ harbor_user }}"
+        password: "{{ harbor_password }}"
+      no_log: true
+
+    # Загружаем образ приложения из Harbor
+    - name: Pull application Docker image
+      community.docker.docker_image:
+        name: "{{ app_image }}"
+        source: pull
+
+    # Запускаем миграции базы данных
+    - name: Run database migrations
+      community.docker.docker_container:
+        name: audit-svc-migrate
+        image: "{{ app_image }}"
+        state: started
+        detach: false
+        cleanup: true
+        command: migrate
+        volumes:
+          - "{{ deploy_dir }}/config.yaml:/etc/audit-svc/config.yaml:ro"
+        networks:
+          - name: "{{ network_name }}"
+      no_log: true
+
+    # Запускаем основной сервис
+    - name: Start audit-svc container
+      community.docker.docker_container:
+        name: "{{ app_container }}"
+        image: "{{ app_image }}"
+        state: started
+        restart_policy: unless-stopped
+        published_ports:
+          - "{{ app_port }}:8080"
+        volumes:
+          - "{{ deploy_dir }}/config.yaml:/etc/audit-svc/config.yaml:ro"
+        networks:
+          - name: "{{ network_name }}"

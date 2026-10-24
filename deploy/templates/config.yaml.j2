@@ -1,0 +1,7 @@
+# Конфигурация подключения audit-svc к PostgreSQL
+database:
+  host: postgres
+  port: 5432
+  name: audit
+  user: audit_svc
+  password: {{ db_password | to_json }}
