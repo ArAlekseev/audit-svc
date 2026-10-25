@@ -19,3 +19,11 @@ server.tar.gz
 
 # Локальные переменные окружения
 .env
+
+# Jupyter Notebook
+*.ipynb
+.ipynb_checkpoints/
+
+# Локальные файлы с паролями
+.vault_pass
+vault-password.txt
