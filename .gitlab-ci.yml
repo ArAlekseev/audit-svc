@@ -29,7 +29,6 @@ Deploy Ansible:
       set -eu
 
       IMAGE_VAR="$(printf '%s' "$CI_PROJECT_NAME" | tr '.-' '__')_IMAGE"
-      IMAGE_VAR="$(printf '%s' "$IMAGE_VAR" | tr '[:lower:]' '[:upper:]')"
 
       APP_IMAGE="$(sed -n "s/^${IMAGE_VAR}=//p" image.env | head -n 1)"
       test -n "$APP_IMAGE"
