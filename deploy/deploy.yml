@@ -65,13 +65,19 @@
       until: postgres_ready.rc == 0
       changed_when: false
 
+      # Получаем IP PostgreSQL во внутренней Docker-сети
+    - name: Get PostgreSQL container IP
+      ansible.builtin.set_fact:
+        postgres_host: "{{ postgres_container_result.container.NetworkSettings.Networks[network_name].IPAddress }}"
+      changed_when: false
+
     # Создаём пользователя приложения в PostgreSQL
     - name: Create application database user
       community.postgresql.postgresql_user:
         name: "{{ postgres_user }}"
         password: "{{ db_password }}"
         role_attr_flags: LOGIN
-        login_host: 127.0.0.1
+        login_host: "{{ postgres_host }}"
         login_user: postgres
         login_password: "{{ postgres_password }}"
       no_log: true
@@ -81,7 +87,7 @@
       community.postgresql.postgresql_db:
         name: "{{ postgres_database }}"
         owner: "{{ postgres_user }}"
-        login_host: 127.0.0.1
+        login_host: "{{ postgres_host }}"
         login_user: postgres
         login_password: "{{ postgres_password }}"
       no_log: true
@@ -93,6 +99,7 @@
         dest: "{{ deploy_dir }}/config.yaml"
         mode: "0600"
       no_log: true
+      notify: Reload application configuration
 
     # Авторизуемся в Harbor для получения образа
     - name: Log in to Harbor registry
@@ -136,3 +143,11 @@
           - "{{ deploy_dir }}/config.yaml:/etc/audit-svc/config.yaml:ro"
         networks:
           - name: "{{ network_name }}"
+  handlers:
+    # Перечитываем конфигурацию без перезапуска контейнера
+    - name: Reload application configuration
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ app_port }}/reload"
+        method: POST
+        status_code: 200
+      register: reload_result
