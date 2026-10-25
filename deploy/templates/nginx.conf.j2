@@ -1,0 +1,30 @@
+server {
+    listen 8088;
+    server_name _;
+
+    merge_slashes on;
+
+    location ~* (^|/)reload($|[/?]) {
+        return 404;
+    }
+
+    location / {
+        proxy_pass http://audit-svc:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+
+server {
+    listen 8081;
+    server_name _;
+
+    location = /stub_status {
+        stub_status;
+        access_log off;
+    }
+
+    location / {
+        return 404;
+    }
+}
