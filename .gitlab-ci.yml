@@ -1,15 +1,46 @@
-# Подключаем готовый шаблон CI/CD пайплайна
+# Подключаем готовый шаблон CI/CD
 include:
   - project: demo/templates
     ref: main
     file:
       - pipelines/python_poetry_docker.yml
 
-# Используем Dockerfile нашего приложения
+# Настройки сборки Docker-образа
 variables:
   DOCKERFILE: Dockerfile
 
-# Отключаем стандартный деплой
+# Стандартный деплой отключён
 Deploy Job:
   rules:
     - when: never
+
+# Развёртывание приложения через Ansible
+Deploy Ansible:
+  stage: deploy
+  tags:
+    - deploy
+  needs:
+    - job: Publish Package
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+  script:
+    - |
+      set -eu
+
+      IMAGE_VAR="$(printf '%s' "$CI_PROJECT_NAME" | tr '.-' '__')_IMAGE"
+      IMAGE_VAR="$(printf '%s' "$IMAGE_VAR" | tr '[:lower:]' '[:upper:]')"
+
+      APP_IMAGE="$(sed -n "s/^${IMAGE_VAR}=//p" image.env | head -n 1)"
+      test -n "$APP_IMAGE"
+
+      VAULT_FILE="$(mktemp)"
+      trap 'rm -f "$VAULT_FILE"' EXIT
+      chmod 600 "$VAULT_FILE"
+      printf '%s\n' "$ANSIBLE_VAULT_PASSWORD" > "$VAULT_FILE"
+
+      ansible-playbook \
+        -i deploy/inventory.ini \
+        deploy/deploy.yml \
+        --vault-password-file "$VAULT_FILE" \
+        -e "app_image=$APP_IMAGE"
